@@ -126,7 +126,7 @@ async fn main() {
     let output_filename = &args[2];
 
     match fetch_icons(base_url).await {
-        Ok(icons) => match serde_json::to_string_pretty(&icons) {
+        Ok(icons) => match serde_json::to_string(&icons) {
             Ok(json_str) => match std::fs::write(output_filename, &json_str) {
                 Ok(_) => println!(
                     "Successfully wrote icons to {}, size: {}",
