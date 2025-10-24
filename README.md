@@ -42,3 +42,17 @@ This project relies on the following Rust crates:
 - `futures`: For asynchronous programming utilities.
 - `regex`: For regular expression matching.
 - `once_cell`: For one-time initialization of static variables.
+
+## Examples
+
+Download Cupertino Icons
+
+```bash
+cargo run --release https://api.flutter.dev/flutter/cupertino/CupertinoIcons-class.html cupertino_icons.json
+```
+
+Download Material Icons
+
+```bash
+cargo run --release https://api.flutter.dev/flutter/material/Icons-class.html material_icons.json
+```

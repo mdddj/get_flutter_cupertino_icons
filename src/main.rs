@@ -5,6 +5,7 @@ use reqwest::Client;
 use select::document::Document;
 use select::predicate::{Attr, Class, Name, Predicate};
 use serde::{Deserialize, Serialize};
+use std::env;
 use std::error::Error;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -22,10 +23,9 @@ async fn fetch_page(client: &Client, url: &str) -> Result<String, Box<dyn Error 
     Ok(body)
 }
 
-async fn fetch_icons() -> Result<Vec<Icon>, Box<dyn Error + Send + Sync>> {
-    let base_url = "https://api.flutter.dev/flutter/cupertino/CupertinoIcons-class.html";
-
+async fn fetch_icons(base_url: &str) -> Result<Vec<Icon>, Box<dyn Error + Send + Sync>> {
     let client = Client::new();
+    let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(100)); // Limit concurrent requests
 
     let body = fetch_page(&client, base_url).await?;
     let document = Document::from(body.as_str());
@@ -38,6 +38,7 @@ async fn fetch_icons() -> Result<Vec<Icon>, Box<dyn Error + Send + Sync>> {
         })
         .map(|node| {
             let client = client.clone();
+            let semaphore_clone = semaphore.clone(); // Clone semaphore for the new task
 
             let icon_name = node.find(Name("a")).next().unwrap().text();
             let detail_href = node
@@ -49,6 +50,9 @@ async fn fetch_icons() -> Result<Vec<Icon>, Box<dyn Error + Send + Sync>> {
                 .to_string();
 
             tokio::spawn(async move {
+                let permit = semaphore_clone.acquire().await; // Acquire a permit before proceeding
+                let _permit = permit.unwrap(); // This will block if no permits are available
+
                 let detail_url = format!("https://api.flutter.dev/flutter/{}", detail_href);
 
                 match fetch_icon_code(&client, &detail_url).await {
@@ -58,6 +62,7 @@ async fn fetch_icons() -> Result<Vec<Icon>, Box<dyn Error + Send + Sync>> {
                     }),
                     Err(e) => Err(format!("Failed to load icon '{}': {}", icon_name, e)),
                 }
+                // Permit is automatically released when `_permit` goes out of scope here
             })
         })
         .collect();
@@ -108,13 +113,24 @@ fn extract_hex_code(text: &str) -> Option<String> {
         Lazy::new(|| Regex::new(r"0x[[:xdigit:]]+").expect("无效的正则表达式"));
     HEX_REGEX.find(text).map(|mat| mat.as_str().to_string())
 }
+
 #[tokio::main]
 async fn main() {
-    match fetch_icons().await {
+    let args: Vec<String> = env::args().collect();
+    if args.len() != 3 {
+        eprintln!("Usage: {} <base_url> <output_filename>", args[0]);
+        std::process::exit(1);
+    }
+
+    let base_url = &args[1];
+    let output_filename = &args[2];
+
+    match fetch_icons(base_url).await {
         Ok(icons) => match serde_json::to_string_pretty(&icons) {
-            Ok(json_str) => match std::fs::write("icons.json", &json_str) {
+            Ok(json_str) => match std::fs::write(output_filename, &json_str) {
                 Ok(_) => println!(
-                    "Successfully wrote icons to icons.json, size: {}",
+                    "Successfully wrote icons to {}, size: {}",
+                    output_filename,
                     icons.len()
                 ),
                 Err(e) => eprintln!("Error writing to file: {}", e),
